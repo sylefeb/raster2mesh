@@ -1,0 +1,3 @@
+[submodule "src/LibSL"]
+	path = src/LibSL
+	url = https://github.com/sylefeb/LibSL.git

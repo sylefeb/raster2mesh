@@ -42,9 +42,9 @@ void main()
 {
   int vid = int(imageLoad(u_Triangles, int(gl_InstanceID*3+gl_VertexID)).x);
   vec4 ctr;
-  ctr.x   = imageLoad( u_Centroids, vid*4 + 0 ).x;
-  ctr.y   = imageLoad( u_Centroids, vid*4 + 1 ).x;
-  ctr.z   = imageLoad( u_Centroids, vid*4 + 2 ).x;
+  ctr.x   = imageLoad( u_Centroids, vid*3 + 0 ).x;
+  ctr.y   = imageLoad( u_Centroids, vid*3 + 1 ).x;
+  ctr.z   = imageLoad( u_Centroids, vid*3 + 2 ).x;
   ctr.w   = 1.0;
   u_UV        = mvf_vertex.xy;
   vec4 trsf   = u_Model * (ctr * 2.0 - 1.0);

@@ -35,53 +35,56 @@ out vec4 o_PixColor;
 uniform layout(r32f) imageBuffer u_Centroids;
 uniform int u_NumCentroids;
 
-restrict coherent uniform layout(r32ui) uimageBuffer u_Grid;
+layout(r32ui) restrict coherent uniform uimageBuffer u_Grid;
 uniform ivec3 u_GridSize;
 
-restrict coherent uniform layout(r32f)  imageBuffer u_GridData;
-
 uniform int u_ScreenWidth;
+
+layout(r32ui) restrict coherent uniform uimageBuffer u_Counter;
+
+// --------------------------------------------
+
+// hash3 from https://www.shadertoy.com/view/ld2GRz 
+// (MIT license, Copyright (c) 2013 Inigo Quilez) 
+vec3 hash3(float n)
+{
+  return fract(sin(vec3(n, n + 1.0, n + 2.0)) * vec3(43758.5453123, 22578.1459123, 19642.3490423));
+}
 
 // --------------------------------------------
 
 void main()
 {
-  o_PixColor = vec4(1, 0, 0, 0);
+  if (gl_SampleMaskIn[0] == 0)  {
 
-  if (gl_SampleMaskIn[0] == 0) {
-
-    // do nothing
+      // do nothing
 
   } else {
 
-    int id = int(gl_FragCoord.x) + int(gl_FragCoord.y) * u_ScreenWidth;
-    if (id < u_NumCentroids) {
-
-      vec3 ctr;
-      ctr.x = imageLoad(u_Centroids, id * 3 + 0).x;
-      ctr.y = imageLoad(u_Centroids, id * 3 + 1).x;
-      ctr.z = imageLoad(u_Centroids, id * 3 + 2).x;
-      // compute grid entry
-      ivec3 ijk = ivec3(vec3(u_GridSize) * ctr.xyz);
-      ijk       = min(ijk, u_GridSize - ivec3(1));
-      ijk       = max(ijk, ivec3(0));
-      // store
-      int entry = ijk.x + ijk.y * u_GridSize.x + ijk.z * u_GridSize.x * u_GridSize.y;
-      int pos   = int(imageLoad(u_Grid, entry * 4 + 2).x
-                    + imageAtomicAdd(u_Grid, entry * 4 + 1, uint(1)));
-      if (pos < u_NumCentroids) {
-        imageStore(u_GridData, pos * 4 + 0, vec4(ctr.x));
-        imageStore(u_GridData, pos * 4 + 1, vec4(ctr.y));
-        imageStore(u_GridData, pos * 4 + 2, vec4(ctr.z));
-        imageStore(u_GridData, pos * 4 + 3, vec4(id));
-        o_PixColor = vec4(float(pos & 255u) / 255.0, float(pos / 255u) / 255.0, 0, 0);
-      } else {
-        o_PixColor = vec4(0, 0, 1, 0);
+	  int id = int(gl_FragCoord.x) + int(gl_FragCoord.y) * u_ScreenWidth;
+	  if ( id < u_GridSize.x*u_GridSize.y*u_GridSize.z) {
+	    // read grid content
+      uint num = imageLoad(u_Grid, id * 4 + 3).x;
+      if (num > 0) {
+        vec3 ctr;
+        ctr.x = float(imageLoad(u_Grid, id * 4 + 0).x) / float(1 << 16);
+        ctr.y = float(imageLoad(u_Grid, id * 4 + 1).x) / float(1 << 16);
+        ctr.z = float(imageLoad(u_Grid, id * 4 + 2).x) / float(1 << 16);
+        ctr.xyz = ctr.xyz / float(num);
+        int cid = int(imageAtomicAdd( u_Counter, 0, 1u ));
+        if (cid < u_NumCentroids) {
+          vec3 r = hash3(dot(ctr, vec3(1.0))) - vec3(0.5);
+          ctr = ctr + 0.01 * r;
+          imageStore(u_Centroids, cid * 3 + 0, vec4(ctr.x));
+          imageStore(u_Centroids, cid * 3 + 1, vec4(ctr.y));
+          imageStore(u_Centroids, cid * 3 + 2, vec4(ctr.z));
+        }
       }
-    }
+	  }
 
   }
 
+   o_PixColor = vec4(0,1,0,0);
 }
 
 // --------------------------------------------

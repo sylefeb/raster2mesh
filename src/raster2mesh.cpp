@@ -37,24 +37,27 @@ DAMAGES(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
 #include <imgui.h>
 #include <LibSL/UIHelpers/BindImGui.h>
 
-#include "sh_raster.h"
 #include "sh_clear.h"
+#include "sh_init.h"
 #include "sh_count.h"
 #include "sh_allocate.h"
 #include "sh_store.h"
 #include "sh_update.h"
 #include "sh_gentris.h"
 #include "sh_mesh.h"
+#include "sh_raster.h"
+#include "sh_implicit.h"
 
-AutoBindShader::sh_raster    g_ShRaster;
-AutoBindShader::sh_raster    g_ShDisplay;
-AutoBindShader::sh_clear     g_ShClear;
-AutoBindShader::sh_count     g_ShCount;
-AutoBindShader::sh_allocate  g_ShAllocate;
-AutoBindShader::sh_store     g_ShStore;
-AutoBindShader::sh_update    g_ShUpdate;
-AutoBindShader::sh_gentris   g_ShGenTris;
-AutoBindShader::sh_mesh      g_ShMesh;
+AutoBindShader::sh_clear      g_ShClear;
+AutoBindShader::sh_count      g_ShCount;
+AutoBindShader::sh_allocate   g_ShAllocate;
+AutoBindShader::sh_store      g_ShStore;
+AutoBindShader::sh_update     g_ShUpdate;
+AutoBindShader::sh_gentris    g_ShGenTris;
+AutoBindShader::sh_mesh       g_ShMesh;
+AutoBindShader::sh_raster     g_ShRaster;
+AutoBindShader::sh_implicit   g_ShImplicit;
+AutoBindShader::sh_init       g_ShInit;
 
 // --------------------------------------------------------------
 
@@ -65,7 +68,6 @@ using namespace std;
 
 #define SCREEN_W   1024 // screen width and height
 #define SCREEN_H   768
-#define RASTER_RES 512  // resolution for off-screen rasterization
 
 // view parameters
 #define FOV      float(M_PI/4.0)
@@ -74,9 +76,11 @@ using namespace std;
 
 #define CONNECT_NUM_ENTRIES 16 // max number of neighbors per centroids
 
-int g_NumCentroids = 111;      // initial number of centroids
-int g_GridSize     = -1;       // set by initialize()
-int g_NumTris      = -1;       // set by initialize()
+int  g_NumCentroids = 111;      // initial number of centroids
+int  g_GridSize     = -1;       // set by initialize()
+int  g_NumTris      = -1;       // set by initialize()
+bool g_Select       = true;     // selects mesh or implicit
+int  g_RasterRes    = 1024;     // resolution for off-screen rasterization
 
 // --------------------------------------------------------------
 
@@ -137,9 +141,6 @@ void clear(GLTexBuffer& buf)
   g_RT->unbind();
 
   glMemoryBarrier(GL_ALL_BARRIER_BITS);
-
-LIBSL_GL_CHECK_ERROR;
-
 }
 
 /* -------------------------------------------------------- */
@@ -156,44 +157,74 @@ float triangleArea(int t)
 
 /* -------------------------------------------------------- */
 
+// forward declarations
+void raster(bool init);
+
+/* -------------------------------------------------------- */
+
 // places centroids along the mesh surface, at random
 void randomize()
 {
-  vector<float> cdf_areas;
-  cdf_areas.resize(g_Mesh->numTriangles());
-  cdf_areas[0] = triangleArea(0);
-  ForRange(t,1,cdf_areas.size()-1) {
-    cdf_areas[t] = cdf_areas[t-1] + triangleArea(t);
-  }
-  Array<v4f> centroids;
-  centroids.allocate(g_NumCentroids);
-  ForIndex(i, centroids.size()) {
-    // select a triangle (with correct area sampling
-    float p = (rand() * cdf_areas.back()) / (float)RAND_MAX;
-    int t=0,e=(int)cdf_areas.size()-1; // binary search
-    while (t+1<e) {
-      int m=(t+e)>>1;
-      if (p < cdf_areas[m]) { e=m; } else { t=m; }
-    }
-    // sample a point on the triangle
-    v3u tri = g_Mesh->triangleAt(t);
-    v3f r   = v3f(rnd(),rnd(),rnd());
-    r       = r / dot(v3f(1.0),r);
-    v3f pt = g_Mesh->posAt(tri[0]) * r[0]
-           + g_Mesh->posAt(tri[1]) * r[1]
-           + g_Mesh->posAt(tri[2]) * r[2];
-    centroids[i] = v4f(pt * 0.5f + v3f(0.5f), 0);
-  }
+  clear(g_Grid);
+  clear(g_Centroids);
+  clear(g_Counter);
 
+  raster(true);
+
+  uint sz = (uint)ceil(sqrt((float)g_Grid.size())) + 1;
+  if (g_RT->w() < sz) {
+    g_RT = RenderTarget2DLum_Ptr(new RenderTarget2DLum(sz, sz));
+  }
+  g_RT->bind();
+
+  glViewport(0, 0, sz, sz);
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_CULL_FACE);
+
+  m4x4f vp = orthoMatrixGL<float>(0, 1, 0, 1, -1, 1);
+
+  g_ShInit.begin();
+  g_ShInit.u_ViewProj.set(vp);
+  g_ShInit.u_ScreenWidth.set((int)sz);
+
+  g_ShInit.u_Counter.set(2);
+  glBindImageTexture(2, g_Counter.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32UI);
+
+  g_ShInit.u_Centroids.set(1);
+  glBindImageTexture(1, g_Centroids.glTexId(), 0, false, 0, GL_WRITE_ONLY, GL_R32F);
+  g_ShInit.u_NumCentroids.set(g_NumCentroids);
+
+  g_ShInit.u_Grid.set(0);
+  glBindImageTexture(0, g_Grid.glTexId(), 0, false, 0, GL_READ_ONLY, GL_R32UI);
+  g_ShInit.u_GridSize.set(v3i(g_GridSize, g_GridSize, g_GridSize));
+
+  glBegin(GL_QUADS);
+  glVertex2i(0, 0); glVertex2i(1, 0); glVertex2i(1, 1); glVertex2i(0, 1);
+  glEnd();
+  
+  g_ShInit.end();
+
+  glBindImageTexture(0, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  glBindImageTexture(1, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  glBindImageTexture(2, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+
+  g_RT->unbind();
+
+  glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+#if 0
+  int numctrs = 0;
   {
-    glBindBufferARB(GL_TEXTURE_BUFFER, g_Centroids.glId());
-    v4f *ptr = (v4f*)glMapBufferARB(GL_TEXTURE_BUFFER, GL_WRITE_ONLY);
-    memcpy(ptr, &centroids[0][0], centroids.size() * sizeof(v4f));
+    // read triangle count
+    glBindBufferARB(GL_TEXTURE_BUFFER, g_Counter.glId());
+    int *ptr = (int*)glMapBufferARB(GL_TEXTURE_BUFFER, GL_READ_ONLY);
+    memcpy(&numctrs, ptr, sizeof(int));
     glUnmapBufferARB(GL_TEXTURE_BUFFER);
     glBindBufferARB(GL_TEXTURE_BUFFER, 0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
   }
-
-LIBSL_GL_CHECK_ERROR;
+  cerr << "numctrs = " << numctrs << endl;
+#endif
 }
 
 // --------------------------------------------------------------
@@ -212,11 +243,11 @@ void initialize()
   g_Connect.terminate();
   g_Triangles.terminate();
 
-  g_Grid.init(g_GridSize * g_GridSize * g_GridSize * sizeof(uint) * 3 /*totcount,count,ptr*/);
-  g_GridData.init(g_NumCentroids * sizeof(float) * 4 /*x,y,z*/);
-  g_Centroids.init(g_NumCentroids * sizeof(float) * 4 /*x,y,z*/);
+  g_Grid.init(g_GridSize * g_GridSize * g_GridSize * sizeof(uint) * 4 /*totcount,count,ptr | x,y,z,num */);
+  g_GridData.init(g_NumCentroids * sizeof(float) * 4 /*x,y,z,id*/);
+  g_Centroids.init(g_NumCentroids * sizeof(float) * 3 /*x,y,z*/);
   g_Counter.init(sizeof(uint));
-  g_AccumCenter.init(g_NumCentroids * sizeof(float) * 4 /*x,y,z*/);
+  g_AccumCenter.init(g_NumCentroids * sizeof(float) * 4 /*x,y,z,coutn*/);
   g_Connect.init(g_NumCentroids * sizeof(uint) * CONNECT_NUM_ENTRIES);
   g_Triangles.init(g_NumTris * 3 * sizeof(uint));
 
@@ -227,7 +258,7 @@ void initialize()
   clear(g_AccumCenter);
   clear(g_Connect);
 
-LIBSL_GL_CHECK_ERROR;
+  LIBSL_GL_CHECK_ERROR;
 }
 
 // --------------------------------------------------------------
@@ -411,13 +442,13 @@ void store()
 
 // --------------------------------------------------------------
 
-// rasterizes the input to be remeshed, accumulate coordinates for
+// rasterizes the input mesh to be remeshed, accumulate coordinates for
 // centroid position update (Lloyd), detects neighboring cells in
 // Voronoi diagram
 // pixel shader: sh_raster
-void raster()
+void raster_mesh(bool init)
 {
-  uint res = RASTER_RES;
+  uint res = g_RasterRes;
   if (g_RT->w() < res) {
     g_RT = RenderTarget2DLum_Ptr(new RenderTarget2DLum(res, res));
   }
@@ -432,6 +463,7 @@ void raster()
 
   g_ShRaster.begin();
   g_ShRaster.u_AcceptAll.set(0);
+  g_ShRaster.u_Initializing.set(init ? 1 : 0);
 
   g_ShRaster.u_GridSize.set(v3i(g_GridSize, g_GridSize, g_GridSize));
   g_ShRaster.u_Grid.set(0);
@@ -465,6 +497,85 @@ void raster()
   g_RT->unbind();
 
   glMemoryBarrier(GL_ALL_BARRIER_BITS);
+}
+
+// --------------------------------------------------------------
+
+// rasterizes the implicit surface be meshed, accumulate coordinates for
+// centroid position update (Lloyd), detects neighboring cells in
+// Voronoi diagram
+// pixel shader: sh_implicit
+void raster_implicit(bool init)
+{
+  uint res = g_RasterRes;
+  if (g_RT->w() < res) {
+    g_RT = RenderTarget2DLum_Ptr(new RenderTarget2DLum(res, res));
+  }
+
+  g_RT->bind();
+
+  glViewport(0, 0, res, res);
+  LibSL::GPUHelpers::clearScreen(LIBSL_COLOR_BUFFER | LIBSL_DEPTH_BUFFER, 0, 0, 1);
+
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_CULL_FACE);
+
+  m4x4f vp = orthoMatrixGL<float>(0, 1, 0, 1, -1, 1);
+
+  g_ShImplicit.begin();
+  g_ShImplicit.u_Initializing.set(init ? 1 : 0);
+  g_ShImplicit.u_GridSize.set(v3i(g_GridSize, g_GridSize, g_GridSize));
+  g_ShImplicit.u_Grid.set(0);
+  glBindImageTexture(0, g_Grid.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  g_ShImplicit.u_GridData.set(1);
+  glBindImageTexture(1, g_GridData.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32F);
+  g_ShImplicit.u_AccumCenter.set(2);
+  glBindImageTexture(2, g_AccumCenter.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  g_ShImplicit.u_Connect.set(4);
+  glBindImageTexture(4, g_Connect.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  g_ShImplicit.u_ConnectNumEntries.set(int(CONNECT_NUM_ENTRIES));
+  g_ShImplicit.u_ViewProj.set(vp);
+  g_ShImplicit.iResolution.set(v2f(res, res));
+  static float time = 0.0f;
+  g_ShImplicit.iTime.set(time);
+  time += 0.005f;
+
+  g_ShImplicit.u_Dir.set(0);
+  glBegin(GL_QUADS);
+  glVertex2i(0, 0); glVertex2i(1, 0); glVertex2i(1, 1); glVertex2i(0, 1);
+  glEnd();
+  
+  g_ShImplicit.u_Dir.set(1);
+  glBegin(GL_QUADS);
+  glVertex2i(0, 0); glVertex2i(1, 0); glVertex2i(1, 1); glVertex2i(0, 1);
+  glEnd();
+
+  g_ShImplicit.u_Dir.set(2);
+  glBegin(GL_QUADS);
+  glVertex2i(0, 0); glVertex2i(1, 0); glVertex2i(1, 1); glVertex2i(0, 1);
+  glEnd();
+
+  g_ShImplicit.end();
+  glBindImageTexture(0, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  glBindImageTexture(1, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  glBindImageTexture(2, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  glBindImageTexture(3, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  glBindImageTexture(4, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+
+  g_RT->unbind();
+
+  glMemoryBarrier(GL_ALL_BARRIER_BITS);
+}
+
+// --------------------------------------------------------------
+
+void raster(bool init)
+{
+  if (g_Select) {
+    raster_implicit(init);
+  } else {
+    raster_mesh(init);
+  }
 }
 
 // --------------------------------------------------------------
@@ -541,48 +652,34 @@ void display()
     connect.allocate(g_NumCentroids * CONNECT_NUM_ENTRIES);
     tris.allocate(g_NumTris * 3);
   }
-  if (!g_ShowMesh) {
-    g_ShDisplay.begin();
-    g_ShDisplay.u_AcceptAll.set(1);
-    g_ShDisplay.u_GridSize.set(v3i(g_GridSize, g_GridSize, g_GridSize));
-    glBindImageTexture(0, g_Grid.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32UI);
-    g_ShDisplay.u_GridData.set(1);
-    glBindImageTexture(1, g_GridData.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32F);
-    g_ShDisplay.u_AccumCenter.set(2);
-    glBindImageTexture(2, g_AccumCenter.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32UI);
-    g_ShDisplay.u_ViewProj.set(mproj * TrackballUI::matrix());
-    g_ShDisplay.u_Model.set(m4x4f::identity());
-    g_Renderer->render();
-    g_ShDisplay.end();
-    glBindImageTexture(0, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
-    glBindImageTexture(1, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
-    glBindImageTexture(2, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
-  } else {
-    int numtris = 0;
-    {
-      // read triangle count
-      glBindBufferARB(GL_TEXTURE_BUFFER, g_Counter.glId());
-      int *ptr = (int*)glMapBufferARB(GL_TEXTURE_BUFFER, GL_READ_ONLY);
-      memcpy(&numtris, ptr, sizeof(int));
-      glUnmapBufferARB(GL_TEXTURE_BUFFER);
-      glBindBufferARB(GL_TEXTURE_BUFFER, 0);
-      glMemoryBarrier(GL_ALL_BARRIER_BITS);
-    }
-    Transform::set(LIBSL_PROJECTION_MATRIX, mproj);
-    Transform::set(LIBSL_MODELVIEW_MATRIX, TrackballUI::matrix());
-    g_ShMesh.begin();
-    g_ShMesh.u_Centroids.set(1);
-    glBindImageTexture(1, g_Centroids.glTexId(), 0, false, 0, GL_READ_ONLY, GL_R32F);
-    g_ShMesh.u_Triangles.set(2);
-    glBindImageTexture(2, g_Triangles.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32UI);
-    g_ShMesh.u_Proj.set(mproj);
-    g_ShMesh.u_Model.set(TrackballUI::matrix());
-    g_GPUMesh_tri->instantiate(numtris);
-    g_ShMesh.end();
-    glBindImageTexture(0, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
-    glBindImageTexture(1, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
-    glBindImageTexture(2, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+
+  // draw mesh
+  int numtris = 0;
+  {
+    // read triangle count
+    glBindBufferARB(GL_TEXTURE_BUFFER, g_Counter.glId());
+    int *ptr = (int*)glMapBufferARB(GL_TEXTURE_BUFFER, GL_READ_ONLY);
+    memcpy(&numtris, ptr, sizeof(int));
+    glUnmapBufferARB(GL_TEXTURE_BUFFER);
+    glBindBufferARB(GL_TEXTURE_BUFFER, 0);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
   }
+  Transform::set(LIBSL_PROJECTION_MATRIX, mproj);
+  Transform::set(LIBSL_MODELVIEW_MATRIX, TrackballUI::matrix());
+  g_ShMesh.begin();
+  g_ShMesh.u_Centroids.set(1);
+  glBindImageTexture(1, g_Centroids.glTexId(), 0, false, 0, GL_READ_ONLY, GL_R32F);
+  g_ShMesh.u_Triangles.set(2);
+  glBindImageTexture(2, g_Triangles.glTexId(), 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  g_ShMesh.u_Proj.set(mproj);
+  g_ShMesh.u_Model.set(TrackballUI::matrix());
+  g_GPUMesh_tri->instantiate(numtris);
+  g_ShMesh.end();
+  glBindImageTexture(0, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  glBindImageTexture(1, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+  glBindImageTexture(2, 0, 0, false, 0, GL_READ_WRITE, GL_R32UI);
+
+  // raster_implicit(false);
 }
 
 // --------------------------------------------------------------
@@ -651,19 +748,9 @@ void iter(bool upd = false)
   count();
   allocate();
   store();
-  if (g_ShowMesh) {
-    g_ShRaster.begin();
-    g_ShRaster.u_ComputeConnectivity.set(1);
-    g_ShRaster.end();
-  }
-  raster();
-  if (g_ShowMesh) {
-    clear(g_Counter);
-    gentris();
-    g_ShRaster.begin();
-    g_ShRaster.u_ComputeConnectivity.set(0);
-    g_ShRaster.end();
-  }
+  raster(false);
+  clear(g_Counter);
+  gentris();
   if (upd) {
     update();
   }
@@ -712,6 +799,10 @@ void mainRender()
     g_NumCentroids = numc;
     initialize();
   }
+  if (ImGui::Checkbox("Input mesh or implicit", &g_Select)) {
+    g_RasterRes = g_Select ? 1024 : 512;
+    initialize();
+  }
   ImGui::End();
 
   ImGui::Render();
@@ -750,22 +841,27 @@ int main(int argc, char **argv)
     g_Renderer = AutoPtr<MeshRenderer<MeshFormat_stl::t_VertexFormat> >(new MeshRenderer<MeshFormat_stl::t_VertexFormat>(g_Mesh.raw()));
 
     /// GPU shaders init
-    g_ShRaster.DisplayOnly = false;
     g_ShRaster.init(GL_TRIANGLES, GL_TRIANGLE_STRIP, 3);
-    g_ShDisplay.DisplayOnly = true;
-    g_ShDisplay.init(GL_TRIANGLES, GL_TRIANGLE_STRIP, 3);
     g_ShMesh.init();
     g_ShClear.init();
     g_ShCount.init();
+    g_ShInit.init();
     g_ShAllocate.init();
     g_ShStore.init();
     g_ShUpdate.init();
     g_ShGenTris.init();
+    g_ShImplicit.init();
+
     g_ShRaster.begin();
-    g_ShRaster.u_ComputeConnectivity.set(0);
+    g_ShRaster.u_ComputeConnectivity.set(1);
+    g_ShRaster.u_Initializing.set(0);
     g_ShRaster.end();
+    g_ShImplicit.begin();
+    g_ShImplicit.u_ComputeConnectivity.set(1);
+    g_ShImplicit.u_Initializing.set(0);
+    g_ShImplicit.end();
     /// render target for off-screen rasterization
-    g_RT = RenderTarget2DLum_Ptr(new RenderTarget2DLum(RASTER_RES, RASTER_RES));
+    g_RT = RenderTarget2DLum_Ptr(new RenderTarget2DLum(g_RasterRes, g_RasterRes));
     /// triangle for instantiation
     g_GPUMesh_tri = AutoPtr<SimpleMesh>(new SimpleMesh());
     g_GPUMesh_tri->begin(GPUMESH_TRIANGLELIST);
@@ -783,14 +879,15 @@ int main(int argc, char **argv)
     TrackballUI::loop();
 
     /// clean exit
+    g_ShImplicit.terminate();
     g_ShRaster.terminate();
     g_ShMesh.terminate();
     g_ShClear.terminate();
     g_ShCount.terminate();
+    g_ShInit.terminate();
     g_ShAllocate.terminate();
     g_ShStore.terminate();
     g_ShUpdate.terminate();
-    g_ShDisplay.terminate();
     g_ShGenTris.terminate();
     g_Connect.terminate();
     g_Counter.terminate();

@@ -25,27 +25,17 @@ DAMAGES(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
   OR TORT(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+
 #version 420
-#extension GL_ARB_shader_image_load_store : enable
-#extension GL_ARB_gpu_shader5 : enable
 
-// --------------------------------------------
+in vec4 mvf_vertex;      // LibSL takes care of vertex attributes 'mvf_*' (normal,color0,texcoord0,etc.)
 
-// include the meshing stuff
-#include "sh_cvt.fp"
+uniform mat4 u_ViewProj;
 
-in  vec4 u_Pos;
-out vec4 o_PixColor;
-
-// --------------------------------------------
+out vec4 u_Pos;
 
 void main()
 {
-
-  o_PixColor = vec4(u_Pos.xyz, 0);
-
-  cvt(u_Pos.xyz);
-
+  u_Pos        = mvf_vertex;
+  gl_Position = u_ViewProj * mvf_vertex;
 }
-
-// --------------------------------------------

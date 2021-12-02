@@ -7,12 +7,14 @@ ADD_SUBDIRECTORY(LibSL)
 SET(SHADERS
 	sh_raster
 	sh_clear
+	sh_init
 	sh_count
 	sh_store
 	sh_allocate
 	sh_update
 	sh_gentris
 	sh_mesh
+	sh_implicit
 )
 AUTO_BIND_SHADERS( ${SHADERS} )
 
@@ -22,6 +24,7 @@ ADD_EXECUTABLE(raster2mesh
 	sh_raster.vp
 	sh_raster.gs
 	sh_raster.h
+	sh_cvt.fp
 	sh_mesh.fp
 	sh_mesh.vp
 	sh_mesh.h
@@ -31,12 +34,18 @@ ADD_EXECUTABLE(raster2mesh
 	sh_count.fp
 	sh_count.vp
 	sh_count.h
+	sh_init.fp
+	sh_init.vp
+	sh_init.h
 	sh_store.fp
 	sh_store.vp
 	sh_store.h
 	sh_allocate.fp
 	sh_allocate.vp
 	sh_allocate.h
+	sh_implicit.vp
+	sh_implicit.fp
+	sh_implicit.h
 	sh_update.fp
 	sh_update.vp
 	sh_update.h

@@ -55,21 +55,19 @@ void main()
 	  int id = int(gl_FragCoord.x) + int(gl_FragCoord.y) * u_ScreenWidth;
 	  if ( id < u_NumCentroids ) {
 
-	    vec4 ctr;
-		ctr.x = imageLoad( u_Centroids, id*4 + 0 ).x;
-		ctr.y = imageLoad( u_Centroids, id*4 + 1 ).x;
-		ctr.z = imageLoad( u_Centroids, id*4 + 2 ).x;
-		ctr.w = imageLoad( u_Centroids, id*4 + 3 ).x;
-		// compute grid entry
-		ivec3 ijk = ivec3(vec3(u_GridSize) * ctr.xyz);
-		ijk       = min(ijk, u_GridSize-ivec3(1));
-		ijk       = max(ijk, ivec3(0));
-		// increment
-		int entry = ijk.x + ijk.y * u_GridSize.x + ijk.z * u_GridSize.x * u_GridSize.y;
-		uint cnt = imageAtomicAdd( u_Grid, entry*3 + 0, uint(1) );
+	    vec3 ctr;
+			ctr.x = imageLoad( u_Centroids, id*3 + 0 ).x;
+			ctr.y = imageLoad( u_Centroids, id*3 + 1 ).x;
+			ctr.z = imageLoad( u_Centroids, id*3 + 2 ).x;
+			// compute grid entry
+			ivec3 ijk = ivec3(vec3(u_GridSize) * ctr.xyz);
+			ijk       = min(ijk, u_GridSize-ivec3(1));
+			ijk       = max(ijk, ivec3(0));
+			// increment
+			int entry = ijk.x + ijk.y * u_GridSize.x + ijk.z * u_GridSize.x * u_GridSize.y;
+			uint cnt = imageAtomicAdd( u_Grid, entry*4 + 0, uint(1) );
 
-	    // o_PixColor = vec4(cnt) / 100000.0;
-		o_PixColor = vec4(ctr);
+			o_PixColor = vec4(ctr,0.0);
 	  }
 
   }

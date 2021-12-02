@@ -43,32 +43,32 @@ uniform int u_ScreenWidth;
 
 void main()
 {
-   o_PixColor = vec4(1,0,0,0);
+  o_PixColor = vec4(1, 0, 0, 0);
 
-  if (gl_SampleMaskIn[0] == 0)  {
+  if (gl_SampleMaskIn[0] == 0) {
 
-      // do nothing
+    // do nothing
 
   } else {
 
-	  int id = int(gl_FragCoord.x) + int(gl_FragCoord.y) * u_ScreenWidth;
-	  if ( id < u_NumCentroids ) {
+    int id = int(gl_FragCoord.x) + int(gl_FragCoord.y) * u_ScreenWidth;
+    if (id < u_NumCentroids) {
 
-	    vec3 ctr;
-		// read accumulated positions, recover floating point values
-        ctr.x = float(imageLoad( u_AccumCenter, id*4 + 0 ).x) / float(1<<16);
-		ctr.y = float(imageLoad( u_AccumCenter, id*4 + 1 ).x) / float(1<<16);
-		ctr.z = float(imageLoad( u_AccumCenter, id*4 + 2 ).x) / float(1<<16);
-		// compute new centroid position by averaging, store
-		uint num = imageLoad( u_AccumCenter, id*4 + 3 ).x;
-		if (num > 0) {
-			ctr.xyz = ctr.xyz / float(num);
-			imageStore( u_Centroids, id*4 + 0, vec4(ctr.x) );
-			imageStore( u_Centroids, id*4 + 1, vec4(ctr.y) );
-			imageStore( u_Centroids, id*4 + 2, vec4(ctr.z) );
-		}
-		o_PixColor = vec4(vec3(num)/16.0,0);
-	  }
+      vec3 ctr;
+      // compute new centroid position by averaging, store
+      uint num = imageLoad(u_AccumCenter, id * 4 + 3).x;
+      if (num > 0) {
+        // read accumulated positions, recover floating point values
+        ctr.x = float(imageLoad(u_AccumCenter, id * 4 + 0).x) / float(1 << 16);
+        ctr.y = float(imageLoad(u_AccumCenter, id * 4 + 1).x) / float(1 << 16);
+        ctr.z = float(imageLoad(u_AccumCenter, id * 4 + 2).x) / float(1 << 16);
+        ctr.xyz = ctr.xyz / float(num);
+        imageStore(u_Centroids, id * 3 + 0, vec4(ctr.x));
+        imageStore(u_Centroids, id * 3 + 1, vec4(ctr.y));
+        imageStore(u_Centroids, id * 3 + 2, vec4(ctr.z));
+      }
+      o_PixColor = vec4(vec3(num) / 16.0, 0);
+    }
 
   }
 

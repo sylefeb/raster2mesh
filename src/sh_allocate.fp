@@ -53,10 +53,10 @@ void main()
 	  int id = int(gl_FragCoord.x) + int(gl_FragCoord.y) * u_ScreenWidth;
 	  if ( id < u_GridSize ) {
       // read counter
-      uint tot = imageLoad(u_Grid, id*3 + 0 ).x;
+      uint tot = imageLoad(u_Grid, id*4 + 0 ).x;
       // increment allocation counter
       uint ptr = imageAtomicAdd( u_Counter, 0, tot );
-      imageStore(u_Grid, id*3 + 2, uvec4(ptr) );
+      imageStore(u_Grid, id*4 + 2, uvec4(ptr) );
       // debug output
       o_PixColor = vec4(float(ptr&255u)/255.0,float(ptr/255u)/255.0,0,0);
 	  }

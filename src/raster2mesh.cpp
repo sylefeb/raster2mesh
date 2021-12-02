@@ -80,6 +80,7 @@ int  g_NumCentroids = 111;      // initial number of centroids
 int  g_GridSize     = -1;       // set by initialize()
 int  g_NumTris      = -1;       // set by initialize()
 bool g_Select       = true;     // selects mesh or implicit
+bool g_MeshLoaded   = false;    // an input mesh was loaded
 int  g_RasterRes    = 1024;     // resolution for off-screen rasterization
 
 // --------------------------------------------------------------
@@ -799,9 +800,11 @@ void mainRender()
     g_NumCentroids = numc;
     initialize();
   }
-  if (ImGui::Checkbox("Input mesh or implicit", &g_Select)) {
-    g_RasterRes = g_Select ? 1024 : 512;
-    initialize();
+  if (g_MeshLoaded) {
+    if (ImGui::Checkbox("Input mesh or implicit", &g_Select)) {
+      g_RasterRes = g_Select ? 1024 : 512;
+      initialize();
+    }
   }
   ImGui::End();
 
@@ -813,8 +816,6 @@ void mainRender()
 int main(int argc, char **argv)
 {
   try {
-
-    sl_assert(argc > 1);
 
     /// init simple UI (glut clone for both GL and D3D)
     cerr << "Init TrackballUI   ";
@@ -834,11 +835,14 @@ int main(int argc, char **argv)
     TrackballUI::trackball().translation() = v3f(0, 0, -1.44f);
 
     /// load mesh
-    g_Mesh = TriangleMesh_Ptr(loadTriangleMesh<MeshFormat_stl::t_VertexData,
-      MeshFormat_stl::t_VertexFormat>(argv[1]));
-    g_Mesh->scaleToUnitCube(0.95f);
-    g_Mesh->centerOn(v3f(0));
-    g_Renderer = AutoPtr<MeshRenderer<MeshFormat_stl::t_VertexFormat> >(new MeshRenderer<MeshFormat_stl::t_VertexFormat>(g_Mesh.raw()));
+    if (argc > 1) {
+      g_Mesh = TriangleMesh_Ptr(loadTriangleMesh<MeshFormat_stl::t_VertexData,
+        MeshFormat_stl::t_VertexFormat>(argv[1]));
+      g_Mesh->scaleToUnitCube(0.95f);
+      g_Mesh->centerOn(v3f(0));
+      g_Renderer = AutoPtr<MeshRenderer<MeshFormat_stl::t_VertexFormat> >(new MeshRenderer<MeshFormat_stl::t_VertexFormat>(g_Mesh.raw()));
+      g_MeshLoaded = true;
+    }
 
     /// GPU shaders init
     g_ShRaster.init(GL_TRIANGLES, GL_TRIANGLE_STRIP, 3);

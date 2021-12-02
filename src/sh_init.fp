@@ -44,8 +44,8 @@ layout(r32ui) restrict coherent uniform uimageBuffer u_Counter;
 
 // --------------------------------------------
 
-// hash3 from https://www.shadertoy.com/view/ld2GRz 
-// (MIT license, Copyright (c) 2013 Inigo Quilez) 
+// hash3 from https://www.shadertoy.com/view/ld2GRz
+// (MIT license, Copyright (c) 2013 Inigo Quilez)
 vec3 hash3(float n)
 {
   return fract(sin(vec3(n, n + 1.0, n + 2.0)) * vec3(43758.5453123, 22578.1459123, 19642.3490423));
@@ -63,18 +63,22 @@ void main()
 
 	  int id = int(gl_FragCoord.x) + int(gl_FragCoord.y) * u_ScreenWidth;
 	  if ( id < u_GridSize.x*u_GridSize.y*u_GridSize.z) {
-	    // read grid content
+	    // if grid cell has been touched
       uint num = imageLoad(u_Grid, id * 4 + 3).x;
       if (num > 0) {
+        // compute average coordinate of all samples within cell
         vec3 ctr;
         ctr.x = float(imageLoad(u_Grid, id * 4 + 0).x) / float(1 << 16);
         ctr.y = float(imageLoad(u_Grid, id * 4 + 1).x) / float(1 << 16);
         ctr.z = float(imageLoad(u_Grid, id * 4 + 2).x) / float(1 << 16);
         ctr.xyz = ctr.xyz / float(num);
+        // allocate one centroid and place it there
         int cid = int(imageAtomicAdd( u_Counter, 0, 1u ));
-        if (cid < u_NumCentroids) {
+        if (cid < u_NumCentroids) { // no more than what we allocated
+          // add a small random perturbation
           vec3 r = hash3(dot(ctr, vec3(1.0))) - vec3(0.5);
           ctr = ctr + 0.01 * r;
+          // store!
           imageStore(u_Centroids, cid * 3 + 0, vec4(ctr.x));
           imageStore(u_Centroids, cid * 3 + 1, vec4(ctr.y));
           imageStore(u_Centroids, cid * 3 + 2, vec4(ctr.z));

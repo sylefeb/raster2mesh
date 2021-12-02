@@ -171,3 +171,4 @@ For state of the art remeshing see the Geogram library by Bruno Levy:
 ## Credits
 
 - [Low poly Totodile by flowalistic](https://www.thingiverse.com/thing:341719).
+- [Metaballs from Inigo Quilez](https://www.shadertoy.com/view/ld2GRz).

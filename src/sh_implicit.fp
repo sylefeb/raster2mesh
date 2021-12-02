@@ -16,8 +16,8 @@
 // unlike the cubic (smoothstep) based fallofs recommended in literature (such as John Hart).
 
 // The quintic polynomial p(x) = 6x5 - 15x4 + 10x3 has zero first and second derivatives in
-// its corners. The maxium slope p''(x)=0 happens in the middle x=1/2, and its value is 
-// p'(1/2) = 15/8. Therefore the  minimum distance to a metaball (in metaball canonical 
+// its corners. The maxium slope p''(x)=0 happens in the middle x=1/2, and its value is
+// p'(1/2) = 15/8. Therefore the  minimum distance to a metaball (in metaball canonical
 // coordinates) is at least 8/15 = 0.533333 (see line 63).
 
 // This shader uses bounding spheres for each ball so that rays traver much faster when far
@@ -97,7 +97,6 @@ vec3 norMetaBalls(vec3 pos)
 
 vec2 intersect(in vec3 ro, in vec3 rd)
 {
-  
   const float maxd = 10.0;
   float t = 0.0;
   float e = map(ro);
@@ -153,7 +152,7 @@ void main()
   }
 
   //-----------------------------------------------------
-  // orthographic camera		
+  // orthographic camera
   //-----------------------------------------------------
   vec3 ro, rd;
   vec3 vw = vec3((q - 0.5) * 10.0, 5.0);

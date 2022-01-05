@@ -688,14 +688,14 @@ void display()
 // produces a mesh for saving it with LibSL
 TriangleMesh_Ptr makeMesh()
 {
-  Array<v4f> centroids(g_NumCentroids);
+  Array<v3f> centroids(g_NumCentroids);
   Array<int> connect(g_NumCentroids * CONNECT_NUM_ENTRIES);
   Array<int> tris(g_NumTris * 3);
   int counter = 0;
   {
     glBindBufferARB(GL_TEXTURE_BUFFER, g_Centroids.glId());
-    v4f *ptr = (v4f*)glMapBufferARB(GL_TEXTURE_BUFFER, GL_READ_ONLY);
-    memcpy(&centroids[0][0], ptr, centroids.size() * sizeof(v4f));
+    v3f *ptr = (v3f*)glMapBufferARB(GL_TEXTURE_BUFFER, GL_READ_ONLY);
+    memcpy(&centroids[0][0], ptr, centroids.size() * sizeof(v3f));
     glUnmapBufferARB(GL_TEXTURE_BUFFER);
     glBindBufferARB(GL_TEXTURE_BUFFER, 0);
   }
